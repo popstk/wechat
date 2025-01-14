@@ -54,6 +54,7 @@ type USParams struct {
 	ExpireType     TExpireType `json:"expire_type"`
 	ExpireTime     int64       `json:"expire_time"`
 	ExpireInterval int         `json:"expire_interval"`
+	IsExpire       bool        `json:"is_expire,omitempty"`
 }
 
 // USResult 返回的结果
@@ -78,8 +79,5 @@ func (u *URLScheme) Generate(params *USParams) (string, error) {
 	}
 	var resp USResult
 	err = util.DecodeWithError(response, &resp, "URLScheme.Generate")
-	if err != nil {
-		return "", err
-	}
-	return resp.OpenLink, nil
+	return resp.OpenLink, err
 }

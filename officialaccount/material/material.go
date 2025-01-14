@@ -4,6 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"os"
+	"path"
 
 	"github.com/silenceper/wechat/v2/officialaccount/context"
 	"github.com/silenceper/wechat/v2/util"
@@ -27,7 +30,7 @@ const (
 	PermanentMaterialTypeImage PermanentMaterialType = "image"
 	// PermanentMaterialTypeVideo 永久素材视频类型（video）
 	PermanentMaterialTypeVideo PermanentMaterialType = "video"
-	// PermanentMaterialTypeVoice 永久素材语音类型 （voice）
+	// PermanentMaterialTypeVoice 永久素材语音类型（voice）
 	PermanentMaterialTypeVoice PermanentMaterialType = "voice"
 	// PermanentMaterialTypeNews 永久素材图文类型（news）
 	PermanentMaterialTypeNews PermanentMaterialType = "news"
@@ -160,8 +163,8 @@ type resAddMaterial struct {
 	URL     string `json:"url"`
 }
 
-// AddMaterial 上传永久性素材（处理视频需要单独上传）
-func (material *Material) AddMaterial(mediaType MediaType, filename string) (mediaID string, url string, err error) {
+// AddMaterialFromReader 上传永久性素材（处理视频需要单独上传），从 io.Reader 中读取
+func (material *Material) AddMaterialFromReader(mediaType MediaType, filePath string, reader io.Reader) (mediaID string, url string, err error) {
 	if mediaType == MediaTypeVideo {
 		err = errors.New("永久视频素材上传使用 AddVideo 方法")
 		return
@@ -173,8 +176,10 @@ func (material *Material) AddMaterial(mediaType MediaType, filename string) (med
 	}
 
 	uri := fmt.Sprintf("%s?access_token=%s&type=%s", addMaterialURL, accessToken, mediaType)
+	// 获取文件名
+	filename := path.Base(filePath)
 	var response []byte
-	response, err = util.PostFile("media", filename, uri)
+	response, err = util.PostFileFromReader("media", filePath, filename, uri, reader)
 	if err != nil {
 		return
 	}
@@ -192,13 +197,24 @@ func (material *Material) AddMaterial(mediaType MediaType, filename string) (med
 	return
 }
 
+// AddMaterial 上传永久性素材（处理视频需要单独上传）
+func (material *Material) AddMaterial(mediaType MediaType, filename string) (mediaID string, url string, err error) {
+	f, err := os.Open(filename)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	return material.AddMaterialFromReader(mediaType, filename, f)
+}
+
 type reqVideo struct {
 	Title        string `json:"title"`
 	Introduction string `json:"introduction"`
 }
 
-// AddVideo 永久视频素材文件上传
-func (material *Material) AddVideo(filename, title, introduction string) (mediaID string, url string, err error) {
+// AddVideoFromReader 永久视频素材文件上传，从 io.Reader 中读取
+func (material *Material) AddVideoFromReader(filePath, title, introduction string, reader io.Reader) (mediaID string, url string, err error) {
 	var accessToken string
 	accessToken, err = material.GetAccessToken()
 	if err != nil {
@@ -216,16 +232,19 @@ func (material *Material) AddVideo(filename, title, introduction string) (mediaI
 	if err != nil {
 		return
 	}
-
+	fileName := path.Base(filePath)
 	fields := []util.MultipartFormField{
 		{
-			IsFile:    true,
-			Fieldname: "media",
-			Filename:  filename,
+			IsFile:     true,
+			Fieldname:  "media",
+			FilePath:   filePath,
+			Filename:   fileName,
+			FileReader: reader,
 		},
 		{
 			IsFile:    false,
 			Fieldname: "description",
+			Filename:  fileName,
 			Value:     fieldValue,
 		},
 	}
@@ -248,6 +267,17 @@ func (material *Material) AddVideo(filename, title, introduction string) (mediaI
 	mediaID = resMaterial.MediaID
 	url = resMaterial.URL
 	return
+}
+
+// AddVideo 永久视频素材文件上传
+func (material *Material) AddVideo(directory, title, introduction string) (mediaID string, url string, err error) {
+	f, err := os.Open(directory)
+	if err != nil {
+		return "", "", err
+	}
+	defer func() { _ = f.Close() }()
+
+	return material.AddVideoFromReader(directory, title, introduction, f)
 }
 
 type reqDeleteMaterial struct {
@@ -278,7 +308,7 @@ type ArticleList struct {
 	Item       []ArticleListItem `json:"item"`
 }
 
-// ArticleListItem 用于ArticleList的item节点
+// ArticleListItem 用于 ArticleList 的 item 节点
 type ArticleListItem struct {
 	MediaID    string             `json:"media_id"`
 	Content    ArticleListContent `json:"content"`
@@ -287,14 +317,14 @@ type ArticleListItem struct {
 	UpdateTime int64              `json:"update_time"`
 }
 
-// ArticleListContent 用于ArticleListItem的content节点
+// ArticleListContent 用于 ArticleListItem 的 content 节点
 type ArticleListContent struct {
 	NewsItem   []Article `json:"news_item"`
 	UpdateTime int64     `json:"update_time"`
 	CreateTime int64     `json:"create_time"`
 }
 
-// reqBatchGetMaterial BatchGetMaterial请求参数
+// reqBatchGetMaterial BatchGetMaterial 请求参数
 type reqBatchGetMaterial struct {
 	Type   PermanentMaterialType `json:"type"`
 	Count  int64                 `json:"count"`
@@ -337,7 +367,7 @@ type ResMaterialCount struct {
 	NewsCount  int64 `json:"news_count"`  // 图文总数量
 }
 
-// GetMaterialCount 获取素材总数.
+// GetMaterialCount 获取素材总数。
 func (material *Material) GetMaterialCount() (res ResMaterialCount, err error) {
 	var accessToken string
 	accessToken, err = material.GetAccessToken()
